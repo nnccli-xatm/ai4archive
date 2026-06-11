@@ -335,6 +335,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - `processing_manifest.json`、`processing_quality_summary.json` 和 service job public summary
   均记录 `ocr_background_delta`、`ocr_preprocess_changed_pixel_ratio`、
   `ocr_foreground_retention_ratio` 等聚合指标。
+- 2026-06-11 local-only 真实扫描样本补充回归：轻微彩色痕迹不再导致 OCR profile
+  `protected_color_content` 硬跳过；12/12 生成 OCR 灰度增强，平均变化率 0.217934。
 
 ### DEV-153 OCR 专用去噪和笔画保护
 
@@ -351,6 +353,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
 - OCR profile 不再默认使用通用 `despeckle` 删除小暗组件，避免误删标点、小字和细笔画。
 - 灰度增强阶段保留暗前景和暗前景邻域的中灰笔画边缘；guardrail 要求前景保留率不低于门槛。
 - final NoisyOffice gate 中暗像素 F1 delta = 0.0，前景保留率 delta = 0.0。
+- 真实扫描低对比页面新增专用前景增强：4/12 触发
+  `applied_low_contrast_foreground_enhancement`，暗前景损失和暗前景抬亮最大值均为 0。
 
 ### DEV-154 自适应阈值和二值 OCR 输出
 
@@ -390,6 +394,8 @@ public-safe 摘要和可量化图像质量验收，暂不继续无边界增加�
   CER/WER 相对下降 100%，public-safe 摘要不包含 OCR 文本或行级记录。
 - `private_validation_aggregate_summary.json` allowlist 已加入 source/processed CER、WER
   和相对下降等聚合指标。
+- 2026-06-11 local-only 真实扫描样本：12/12 生成 `ocr_binary` sidecar；
+  OCR review required 仅 1/12，原因是高彩/红色占比页面，复核原因只记录聚合安全代码。
 
 ## P2：CI、发布和性能
 

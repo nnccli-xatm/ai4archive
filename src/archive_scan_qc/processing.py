@@ -4720,19 +4720,12 @@ def _ocr_preprocess_grayscale(
     )
     if image.width < 30 or image.height < 30:
         return _ocr_preprocess_noop(image, output_profile, "OCR preprocessing skipped: image too small", "too_small")
-    color_risk = _tone_color_risk_reason(image)
-    if color_risk:
-        return _ocr_preprocess_noop(
-            image,
-            output_profile,
-            "OCR preprocessing skipped: color content, stamp, or annotation risk",
-            "protected_color_content",
-            review_required=True,
-        )
+    color_review_reasons = _ocr_color_review_reason_codes(image)
 
     grayscale = image.convert("L")
     histogram = grayscale.histogram()
     total = max(1, image.width * image.height)
+    p01 = _histogram_percentile(histogram, total, 0.01)
     p05 = _histogram_percentile(histogram, total, 0.05)
     p95 = _histogram_percentile(histogram, total, 0.95)
     dark_ratio = sum(histogram[:128]) / total
@@ -4744,7 +4737,8 @@ def _ocr_preprocess_grayscale(
             "foreground_too_dense",
             review_required=True,
         )
-    if p95 < 150 or p95 - p05 < 28:
+    low_contrast_mode = p95 >= 180 and p95 - p05 < 28 and p01 <= p95 - 8
+    if p95 < 150 or (p95 - p05 < 28 and not low_contrast_mode):
         return _ocr_preprocess_noop(
             image,
             output_profile,
@@ -4754,9 +4748,28 @@ def _ocr_preprocess_grayscale(
         )
 
     strong_profile = processing_profile == "ocr_preprocess"
-    result = _ocr_preprocess_grayscale_numpy(grayscale, strong_profile=strong_profile)
-    if result is None:
-        result = _ocr_preprocess_grayscale_fallback(grayscale, strong_profile=strong_profile)
+    if low_contrast_mode:
+        result = _ocr_preprocess_low_contrast_grayscale_numpy(
+            grayscale,
+            p01=p01,
+            p95=p95,
+            strong_profile=strong_profile,
+        )
+        if result is None:
+            result = _ocr_preprocess_low_contrast_grayscale_fallback(
+                grayscale,
+                p01=p01,
+                p95=p95,
+                strong_profile=strong_profile,
+            )
+        applied_reason = "OCR preprocessing applied: low-contrast foreground enhancement with background cleanup"
+        applied_reason_code = "applied_low_contrast_foreground_enhancement"
+    else:
+        result = _ocr_preprocess_grayscale_numpy(grayscale, strong_profile=strong_profile)
+        if result is None:
+            result = _ocr_preprocess_grayscale_fallback(grayscale, strong_profile=strong_profile)
+        applied_reason = "OCR preprocessing applied: grayscale background normalization with dark foreground preservation"
+        applied_reason_code = "applied_background_normalization"
     output, changed_pixel_ratio, background_candidate_pixel_ratio = result
     background_before = float(p95)
     output_histogram = output.histogram()
@@ -4773,7 +4786,13 @@ def _ocr_preprocess_grayscale(
         review_reasons.append("foreground_dark_lift")
     if foreground_retention < 0.998:
         review_reasons.append("foreground_retention")
-    if changed_pixel_ratio < 0.01 or background_delta < 4.0:
+    review_reasons.extend(color_review_reasons)
+    improvement_below_threshold = (
+        changed_pixel_ratio < 0.002
+        if low_contrast_mode
+        else changed_pixel_ratio < 0.01 and background_delta < 4.0
+    )
+    if improvement_below_threshold:
         return OcrPreprocessingResult(
             image,
             False,
@@ -4794,8 +4813,8 @@ def _ocr_preprocess_grayscale(
     return OcrPreprocessingResult(
         output,
         True,
-        "OCR preprocessing applied: grayscale background normalization with dark foreground preservation",
-        "applied_background_normalization",
+        applied_reason,
+        applied_reason_code,
         output_profile,
         round(changed_pixel_ratio, 6),
         background_before,
@@ -4835,6 +4854,34 @@ def _ocr_preprocess_noop(
         review_required,
         (reason_code,) if review_required else (),
     )
+
+
+def _ocr_color_review_reason_codes(image: Image.Image) -> list[str]:
+    if image.mode == "L":
+        return []
+    sample = image.convert("RGB")
+    sample.thumbnail((600, 600), Image.Resampling.BILINEAR)
+    total = max(1, sample.width * sample.height)
+    colored = 0
+    red = 0
+    pixel_data = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+    for red_value, green_value, blue_value in pixel_data:
+        high = max(red_value, green_value, blue_value)
+        low = min(red_value, green_value, blue_value)
+        spread = high - low
+        brightness = (red_value + green_value + blue_value) / 3
+        if spread > 18 and 30 < brightness < 250:
+            colored += 1
+        if red_value >= 110 and red_value - green_value >= 35 and red_value - blue_value >= 35:
+            red += 1
+    colored_ratio = colored / total
+    red_ratio = red / total
+    review_reasons: list[str] = []
+    if colored_ratio >= 0.08:
+        review_reasons.append("color_rich_document_review")
+    if red_ratio >= 0.03:
+        review_reasons.append("red_mark_review")
+    return review_reasons
 
 
 def _ocr_preprocess_grayscale_numpy(
@@ -4914,6 +4961,93 @@ def _ocr_preprocess_grayscale_fallback(
     changed_ratio = _pixel_change_ratio(grayscale, output)
     candidate = grayscale.point(lambda value: 255 if value >= mid_floor else 0, mode="L")
     return output, changed_ratio, _mask_ratio(candidate)
+
+
+def _ocr_low_contrast_foreground_threshold(p01: int, p95: int, *, strong_profile: bool) -> int:
+    separation = 42 if strong_profile else 34
+    faint_margin = 18 if strong_profile else 14
+    upper_margin = 10 if strong_profile else 8
+    threshold = max(p01 + faint_margin, p95 - separation)
+    threshold = min(threshold, p95 - upper_margin)
+    return max(0, min(254, int(max(p01 + 4, threshold))))
+
+
+def _ocr_preprocess_low_contrast_grayscale_numpy(
+    grayscale: Image.Image,
+    *,
+    p01: int,
+    p95: int,
+    strong_profile: bool,
+) -> tuple[Image.Image, float, float] | None:
+    np = _load_numpy()
+    if np is None:
+        return None
+    try:
+        source = np.asarray(grayscale, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return None
+    values = source.astype(np.float32)
+    output = values.copy()
+    foreground_threshold = _ocr_low_contrast_foreground_threshold(
+        p01,
+        p95,
+        strong_profile=strong_profile,
+    )
+    foreground = values <= foreground_threshold
+    foreground_pixels = int(np.count_nonzero(foreground))
+    if foreground_pixels < max(24, int(source.size * 0.0005)):
+        return Image.fromarray(source.copy(), mode="L"), 0.0, 0.0
+    floor = max(0, p01 - (8 if strong_profile else 5))
+    span = max(1.0, float(foreground_threshold - floor))
+    lower = 34.0 if strong_profile else 48.0
+    upper = 138.0 if strong_profile else 160.0
+    output[foreground] = np.clip(
+        lower + ((values[foreground] - floor) / span) * (upper - lower),
+        lower,
+        upper,
+    )
+    dark_foreground = values <= 127
+    output[dark_foreground] = np.minimum(output[dark_foreground], values[dark_foreground])
+    background = ~foreground
+    background_residual = 0.04 if strong_profile else 0.10
+    output[background] = 255.0 - ((255.0 - values[background]) * background_residual)
+    output_u8 = np.clip(np.rint(output), 0, 255).astype(np.uint8)
+    changed = np.abs(output_u8.astype(np.int16) - source.astype(np.int16)) > 8
+    changed_ratio = float(np.count_nonzero(changed)) / max(1, source.size)
+    candidate_ratio = foreground_pixels / max(1, source.size)
+    return Image.fromarray(output_u8, mode="L"), changed_ratio, candidate_ratio
+
+
+def _ocr_preprocess_low_contrast_grayscale_fallback(
+    grayscale: Image.Image,
+    *,
+    p01: int,
+    p95: int,
+    strong_profile: bool,
+) -> tuple[Image.Image, float, float]:
+    foreground_threshold = _ocr_low_contrast_foreground_threshold(
+        p01,
+        p95,
+        strong_profile=strong_profile,
+    )
+    floor = max(0, p01 - (8 if strong_profile else 5))
+    span = max(1.0, float(foreground_threshold - floor))
+    lower = 34 if strong_profile else 48
+    upper = 138 if strong_profile else 160
+    background_residual = 0.04 if strong_profile else 0.10
+
+    def map_value(value: int) -> int:
+        if value <= foreground_threshold:
+            mapped = lower + ((value - floor) / span) * (upper - lower)
+            mapped_value = max(0, min(255, int(round(mapped))))
+            return min(value, mapped_value) if value <= 127 else mapped_value
+        return max(0, min(255, int(round(255 - ((255 - value) * background_residual)))))
+
+    candidate = grayscale.point(lambda value: 255 if value <= foreground_threshold else 0, mode="L")
+    if _mask_pixel_count(candidate) < max(24, int(grayscale.width * grayscale.height * 0.0005)):
+        return grayscale.copy(), 0.0, 0.0
+    output = grayscale.point(map_value, mode="L")
+    return output, _pixel_change_ratio(grayscale, output), _mask_ratio(candidate)
 
 
 def _ocr_foreground_preservation_metrics(source_l: Image.Image, processed_l: Image.Image) -> tuple[float, float, float]:

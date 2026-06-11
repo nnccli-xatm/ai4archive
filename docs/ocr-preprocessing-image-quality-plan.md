@@ -54,6 +54,23 @@ Synthetic OCR gate：
   `ocr_background_delta`、`ocr_foreground_retention_ratio`、`ocr_binary_foreground_ratio`。
 - 私有样本聚合 allowlist 已加入 CER/WER 聚合指标，不接收或输出 OCR 文本。
 
+真实扫描样本回归，2026-06-11：
+
+- 本机 local-only 真实扫描样本 12 张暴露第一版 OCR profile 的目标偏差：旧逻辑只对 2/12
+  生成 OCR 增强和二值 sidecar；8/12 因轻微彩色痕迹被 `protected_color_content`
+  硬跳过，2/12 近白低对比页面因背景分离不足未增强。
+- 修复后 `ocr-preprocess-v1` 不再把彩色痕迹作为 OCR 利用副本的硬拦截；轻微彩色/压缩彩边不复核，
+  仅高彩或红色占比较高的页面进入 OCR review reason。保真派生图的颜色保护逻辑不变。
+- 新增低对比前景增强路径：对近白纸面中的稀疏淡字估计前景阈值，压暗前景、推白背景，
+  并明确禁止抬亮原本已经很暗的像素。
+- 真实扫描样本复测结果：12/12 生成 OCR 灰度增强，12/12 生成 `ocr_binary` sidecar；
+  平均 `ocr_preprocess_changed_pixel_ratio` = 0.217934，最大 0.598217；
+  reason 分布为 4 张 `applied_low_contrast_foreground_enhancement`、8 张
+  `applied_background_normalization`；`ocr_foreground_dark_loss_ratio` 和
+  `ocr_foreground_dark_lift_ratio` 最大值均为 0，前景保留率为 1.0。
+- 该批次 production status 仍为 `needs_review`，原因来自扫描 QC 的 P0 复核项；OCR 处理本身
+  失败 0、guardrail failure 0、processing warning 0。
+
 ## 2. 目标重新定义
 
 新增目标不是“看起来更干净”，而是生成面向 OCR 的利用副本：

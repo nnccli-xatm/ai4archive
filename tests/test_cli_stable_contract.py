@@ -673,6 +673,83 @@ class StableCliRuleTemplateTests(unittest.TestCase):
             15.0,
         )
 
+    def test_production_run_ocr_preprocess_handles_low_contrast_and_light_color_scans(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="scan-cli-ocr-preprocess-real-scan-") as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            derivatives_dir = root / "derivatives"
+            metadata_dir = root / "metadata"
+            input_dir.mkdir()
+            low_contrast_source = input_dir / "OCR001_LOW_CONTRAST.png"
+            light_color_source = input_dir / "OCR002_LIGHT_COLOR.png"
+            _write_ocr_low_contrast_real_scan_page(low_contrast_source)
+            _write_ocr_light_color_scan_page(light_color_source)
+            source_hashes = {
+                low_contrast_source.name: _sha256_for_test(low_contrast_source),
+                light_color_source.name: _sha256_for_test(light_color_source),
+            }
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "production-run",
+                        "--input",
+                        str(input_dir),
+                        "--derivatives-out",
+                        str(derivatives_dir),
+                        "--metadata-out",
+                        str(metadata_dir),
+                        "--rule-template",
+                        "ocr-preprocess-v1",
+                        "--workers",
+                        "1",
+                    ]
+                )
+
+            processing_manifest = json.loads(
+                (derivatives_dir / "processing_manifest.json").read_text(encoding="utf-8")
+            )
+            quality_summary = json.loads(
+                (derivatives_dir / PROCESSING_QUALITY_SUMMARY_JSON).read_text(encoding="utf-8")
+            )
+            records = {
+                Path(record["source_relative_path"]).name: record
+                for record in processing_manifest["files"]
+            }
+            source_hashes_after = {
+                low_contrast_source.name: _sha256_for_test(low_contrast_source),
+                light_color_source.name: _sha256_for_test(light_color_source),
+            }
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            source_hashes_after[low_contrast_source.name],
+            source_hashes[low_contrast_source.name],
+        )
+        self.assertEqual(
+            source_hashes_after[light_color_source.name],
+            source_hashes[light_color_source.name],
+        )
+        self.assertEqual(quality_summary["counts"]["ocr_preprocessed_files"], 2)
+        self.assertEqual(quality_summary["counts"]["ocr_binary_created_files"], 2)
+        low_contrast_record = records[low_contrast_source.name]
+        light_color_record = records[light_color_source.name]
+        self.assertTrue(low_contrast_record["ocr_preprocessed"])
+        self.assertEqual(
+            low_contrast_record["ocr_preprocess_reason_code"],
+            "applied_low_contrast_foreground_enhancement",
+        )
+        self.assertGreater(low_contrast_record["ocr_preprocess_changed_pixel_ratio"], 0.01)
+        self.assertTrue(low_contrast_record["ocr_binary_created"])
+        self.assertGreater(low_contrast_record["ocr_binary_foreground_ratio"], 0.005)
+        self.assertEqual(low_contrast_record["processing_audit"]["guardrail_failures"], [])
+        self.assertTrue(light_color_record["ocr_preprocessed"])
+        self.assertNotEqual(light_color_record["ocr_preprocess_reason_code"], "protected_color_content")
+        self.assertNotIn("protected_color_content", light_color_record["ocr_review_reason_codes"])
+        self.assertGreater(light_color_record["ocr_preprocess_changed_pixel_ratio"], 0.01)
+        self.assertTrue(light_color_record["ocr_binary_created"])
+        self.assertEqual(light_color_record["processing_audit"]["guardrail_failures"], [])
+
     def test_run_plan_accepts_rule_template_and_records_public_batch_choice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="scan-cli-run-plan-template-") as temp_dir:
             root = Path(temp_dir)
@@ -1208,6 +1285,38 @@ def _write_ocr_noisy_page(path: Path) -> None:
         y = 54 + index * 32
         draw.rectangle((54, y, 286, y + 5), fill=42)
         draw.rectangle((64, y + 12, 220, y + 15), fill=86)
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_low_contrast_real_scan_page(path: Path) -> None:
+    width, height = 420, 560
+    image = Image.new("RGB", (width, height), (252, 252, 252))
+    pixels = image.load()
+    for y in range(height):
+        shade = 250 + ((y // 17) % 4)
+        for x in range(width):
+            if (x * 13 + y * 7) % 43 == 0:
+                pixels[x, y] = (248, 248, 248)
+            elif (x + y) % 37 == 0:
+                pixels[x, y] = (shade, shade, shade)
+    draw = ImageDraw.Draw(image)
+    for index in range(9):
+        y = 82 + index * 38
+        draw.rectangle((68, y, 324, y + 2), fill=(226, 226, 226))
+        draw.rectangle((78, y + 13, 248, y + 15), fill=(230, 230, 230))
+    image.save(path, dpi=(300, 300))
+
+
+def _write_ocr_light_color_scan_page(path: Path) -> None:
+    width, height = 420, 560
+    image = Image.new("RGB", (width, height), (247, 248, 246))
+    draw = ImageDraw.Draw(image)
+    for index in range(7):
+        y = 92 + index * 42
+        draw.rectangle((58, y, 330, y + 4), fill=(92, 92, 92))
+        draw.rectangle((70, y + 15, 250, y + 17), fill=(132, 132, 132))
+    draw.rectangle((92, 418, 334, 421), fill=(214, 231, 236))
+    draw.rectangle((110, 438, 278, 440), fill=(238, 224, 204))
     image.save(path, dpi=(300, 300))
 
 
